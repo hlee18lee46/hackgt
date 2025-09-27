@@ -84,14 +84,29 @@ export async function fetchMlbLive(gamePk: number): Promise<LiveSnapshot> {
     "3B": Boolean(runners?.third),
   };
 
-  // batter / pitcher
-  const batter = offense?.batter
-    ? { id: Number(offense.batter?.id), name: offense.batter?.fullName }
-    : (liveData?.boxscore?.offense?.batter ? { id: Number(liveData.boxscore.offense.batter?.id), name: liveData.boxscore.offense.batter?.fullName } : null);
+// primary: currentPlay.matchup
+const matchup = j?.liveData?.plays?.currentPlay?.matchup ?? {};
+const mpBatter = matchup?.batter
+  ? { id: Number(matchup.batter.id), name: String(matchup.batter.fullName) }
+  : null;
+const mpPitcher = matchup?.pitcher
+  ? { id: Number(matchup.pitcher.id), name: String(matchup.pitcher.fullName) }
+  : null;
 
-  const pitcher = defense?.pitcher
-    ? { id: Number(defense.pitcher?.id), name: defense.pitcher?.fullName }
-    : (liveData?.boxscore?.defense?.pitcher ? { id: Number(liveData.boxscore.defense.pitcher?.id), name: liveData.boxscore.defense.pitcher?.fullName } : null);
+// fallbacks: boxscore offense/defense
+const bsOffense = j?.liveData?.boxscore?.offense ?? {};
+const bsDefense = j?.liveData?.boxscore?.defense ?? {};
+const odBatter = bsOffense?.batter
+  ? { id: Number(bsOffense.batter.id), name: String(bsOffense.batter.fullName) }
+  : null;
+const odPitcher = bsDefense?.pitcher
+  ? { id: Number(bsDefense.pitcher.id), name: String(bsDefense.pitcher.fullName) }
+  : null;
+
+// only surface during live play
+const isLive = /in\s*progress|live/i.test(status);
+const batter = isLive ? (mpBatter ?? odBatter) : null;
+const pitcher = isLive ? (mpPitcher ?? odPitcher) : null;
 
   // teams + score
   const homeName = teams?.home?.name || j?.gameData?.teams?.home?.name || "Home";
@@ -120,4 +135,53 @@ export async function fetchMlbLive(gamePk: number): Promise<LiveSnapshot> {
     gameDate,
     venue,
   };
+}
+
+// ---------- Teams / Players / Season Stats (NEW) ----------
+
+export type MlbTeam = {
+  id: number;
+  name: string;
+  abbreviation: string;
+  location: string;
+};
+
+export async function getTeams(): Promise<MlbTeam[]> {
+  const url = `${MLB_BASE}/teams?sportId=1`;
+  const data = await getJSON<any>(url);
+  const teams = Array.isArray(data?.teams) ? data.teams : [];
+  return teams.map((t: any) => ({
+    id: Number(t.id),
+    name: String(t.name),
+    abbreviation: String(t.abbreviation),
+    location: String(t.locationName),
+  }));
+}
+
+export type MlbPlayer = {
+  id: number;
+  fullName: string;
+  primaryNumber?: string;
+  position?: string;
+};
+
+/** Active roster for a team (current season) */
+export async function getTeamPlayers(teamId: number): Promise<MlbPlayer[]> {
+  const url = `${MLB_BASE}/teams/${teamId}/roster`;
+  const data = await getJSON<any>(url);
+  const roster = Array.isArray(data?.roster) ? data.roster : [];
+  return roster.map((r: any) => ({
+    id: Number(r?.person?.id),
+    fullName: String(r?.person?.fullName ?? ""),
+    primaryNumber: r?.jerseyNumber ? String(r.jerseyNumber) : undefined,
+    position: r?.position?.abbreviation ? String(r.position.abbreviation) : undefined,
+  }));
+}
+
+/** Season aggregate stats for a player (matches your Python `stats=season`) */
+export async function getPlayerSeasonStats(playerId: number, season: number): Promise<Record<string, any> | null> {
+  const url = `${MLB_BASE}/people/${playerId}/stats?stats=season&season=${season}`;
+  const j = await getJSON<any>(url);
+  const stat = j?.stats?.[0]?.splits?.[0]?.stat ?? null;
+  return stat;
 }
