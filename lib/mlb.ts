@@ -21,7 +21,15 @@ export interface Linescore {
 export interface ScheduleGame {
   gamePk: number;
   gameDate?: string;
+  status?: {
+    detailedState?: string;
+  };
+  teams?: {
+    home?: { team?: { name?: string } };
+    away?: { team?: { name?: string } };
+  };
 }
+
 
 async function getJSON<T>(url: string): Promise<T> {
   const res = await fetch(url, { cache: "no-store" });
@@ -35,6 +43,7 @@ export async function getSchedule(dateISO: string) {
   url.searchParams.set("date", dateISO);
   return getJSON<{ dates: Array<{ games: ScheduleGame[] }> }>(url.toString());
 }
+
 
 export async function getLinescore(gamePk: number) {
   return getJSON<Linescore>(`${MLB_BASE}/game/${gamePk}/linescore`);
