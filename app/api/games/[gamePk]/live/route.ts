@@ -1,3 +1,4 @@
+// app/api/games/[gamePk]/live/route.ts
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -12,14 +13,20 @@ function cors() {
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
   };
 }
-export async function OPTIONS() { return new Response(null, { headers: cors() }); }
+export async function OPTIONS() {
+  return new Response(null, { headers: cors() });
+}
 
 const STALE_MS = 10_000; // 10 seconds
 
-export async function GET(_req: Request, { params }: { params: { gamePk: string } }) {
-  const gamePk = Number(params.gamePk);
+export async function GET(_req: Request, ctx: { params: Promise<{ gamePk: string }> }) {
+  const { gamePk: gamePkRaw } = await ctx.params;        // ← await it
+  const gamePk = Number(gamePkRaw);
   if (!gamePk) {
-    return NextResponse.json({ success:false, message:"Bad gamePk" }, { status:400, headers: cors() });
+    return NextResponse.json(
+      { success: false, message: "Bad gamePk" },
+      { status: 400, headers: cors() }
+    );
   }
 
   const db = await getDb();
@@ -30,7 +37,7 @@ export async function GET(_req: Request, { params }: { params: { gamePk: string 
 
   const now = Date.now();
   const updatedAt = doc?.updatedAt ? new Date(doc.updatedAt).getTime() : 0;
-  const isStale = !doc || (now - updatedAt) > STALE_MS;
+  const isStale = !doc || now - updatedAt > STALE_MS;
 
   // 2) If stale, pull from MLB and upsert
   if (isStale) {
@@ -39,7 +46,9 @@ export async function GET(_req: Request, { params }: { params: { gamePk: string 
 
       const payload = {
         gamePk,
-        date: doc?.date ?? (snap.gameDate ? new Date(snap.gameDate).toISOString().slice(0,10) : null),
+        date:
+          doc?.date ??
+          (snap.gameDate ? new Date(snap.gameDate).toISOString().slice(0, 10) : null),
         gameDate: snap.gameDate ?? doc?.gameDate ?? null,
         status: snap.status,
         inning: snap.inning,
@@ -64,14 +73,16 @@ export async function GET(_req: Request, { params }: { params: { gamePk: string 
       );
 
       doc = await col.findOne({ gamePk });
-    } catch (e) {
-      // If MLB fetch fails, still respond with whatever we had
-      // (so your UI doesn't blank out)
+    } catch {
+      // swallow fetch errors; fall back to last-known doc
     }
   }
 
   if (!doc) {
-    return NextResponse.json({ success:false, message:"Not found" }, { status:404, headers: cors() });
+    return NextResponse.json(
+      { success: false, message: "Not found" },
+      { status: 404, headers: cors() }
+    );
   }
 
   const response = {
@@ -94,5 +105,5 @@ export async function GET(_req: Request, { params }: { params: { gamePk: string 
     updatedAt: doc.updatedAt ?? null,
   };
 
-  return NextResponse.json({ success:true, game: response }, { headers: cors() });
+  return NextResponse.json({ success: true, game: response }, { headers: cors() });
 }
