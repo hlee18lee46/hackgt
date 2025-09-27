@@ -1,4 +1,38 @@
 // lib/mlb.ts
+
+// ---------- Types for "schedule" ----------
+export interface ScheduleGame {
+  gamePk: number;
+  gameDate?: string;
+  status?: { detailedState?: string };
+  teams?: {
+    home?: { team?: { name?: string } };
+    away?: { team?: { name?: string } };
+  };
+}
+
+export interface ScheduleResponse {
+  dates: Array<{ games: ScheduleGame[] }>;
+}
+
+// ---------- Schedule helpers (NEW) ----------
+const MLB_BASE = "https://statsapi.mlb.com/api/v1";
+
+async function getJSON<T>(url: string): Promise<T> {
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+  return (await r.json()) as T;
+}
+
+/** List games for a specific date (YYYY-MM-DD) */
+export async function getSchedule(dateISO: string): Promise<ScheduleResponse> {
+  const u = new URL(`${MLB_BASE}/schedule`);
+  u.searchParams.set("sportId", "1");
+  u.searchParams.set("date", dateISO);
+  return getJSON<ScheduleResponse>(u.toString());
+}
+
+// ---------- Your existing live snapshot code ----------
 export type LiveSnapshot = {
   status: string;               // Scheduled | In Progress | Final | etc.
   inning: number | null;
