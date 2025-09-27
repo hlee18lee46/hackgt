@@ -14,7 +14,7 @@ function cors() {
 }
 export async function OPTIONS() { return new Response(null, { headers: cors() }); }
 
-const STALE_MS = 5_000; // 5 seconds
+const STALE_MS = 10_000; // 10 seconds
 
 export async function GET(_req: Request, { params }: { params: { gamePk: string } }) {
   const gamePk = Number(params.gamePk);
