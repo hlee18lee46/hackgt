@@ -19,8 +19,19 @@ export interface ScheduleResponse {
 const MLB_BASE = "https://statsapi.mlb.com/api/v1";
 
 async function getJSON<T>(url: string): Promise<T> {
-  const r = await fetch(url, { cache: "no-store" });
-  if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+  const r = await fetch(url, {
+    cache: "no-store",
+    // next: { revalidate: 0 }, // optional, fine to keep commented
+    headers: {
+      // Some public APIs get picky without a UA
+      "User-Agent": "livesports/1.0 (+https://livesports-beta.vercel.app)",
+      "Accept": "application/json",
+    },
+  });
+  if (!r.ok) {
+    const text = await r.text().catch(() => "");
+    throw new Error(`${r.status}: ${text || "fetch failed"}`);
+  }
   return (await r.json()) as T;
 }
 
@@ -107,7 +118,6 @@ const odPitcher = bsDefense?.pitcher
 const isLive = /in\s*progress|live/i.test(status);
 const batter = isLive ? (mpBatter ?? odBatter) : null;
 const pitcher = isLive ? (mpPitcher ?? odPitcher) : null;
-
   // teams + score
   const homeName = teams?.home?.name || j?.gameData?.teams?.home?.name || "Home";
   const awayName = teams?.away?.name || j?.gameData?.teams?.away?.name || "Away";
@@ -179,9 +189,62 @@ export async function getTeamPlayers(teamId: number): Promise<MlbPlayer[]> {
 }
 
 /** Season aggregate stats for a player (matches your Python `stats=season`) */
-export async function getPlayerSeasonStats(playerId: number, season: number): Promise<Record<string, any> | null> {
-  const url = `${MLB_BASE}/people/${playerId}/stats?stats=season&season=${season}`;
-  const j = await getJSON<any>(url);
-  const stat = j?.stats?.[0]?.splits?.[0]?.stat ?? null;
-  return stat;
+/** Season aggregate stats for a player (robust) */
+export async function getPlayerSeasonStats(
+  playerId: number,
+  season: number
+): Promise<Record<string, any> | null> {
+  const base = `${MLB_BASE}/people/${playerId}/stats`;
+  const mk = (qs = "") => `${base}?stats=season&season=${season}&sportId=1${qs}`;
+
+  const candidates = [
+    mk(""),                        // no group
+    mk("&group=hitting"),
+    mk("&group=pitching"),
+    mk("&gameType=R"),
+    mk("&group=hitting&gameType=R"),
+    mk("&group=pitching&gameType=R"),
+  ];
+
+  // Fetch the first candidate that returns splits
+  let payload: any = null;
+  for (const url of candidates) {
+    try {
+      const j = await getJSON<any>(url);
+      const splits = j?.stats?.[0]?.splits;
+      if (Array.isArray(splits) && splits.length) {
+        payload = j;
+        break;
+      }
+    } catch {
+      // try next pattern
+    }
+  }
+  if (!payload) return null;
+
+  const splits: any[] = payload.stats[0].splits;
+
+  // 1) Prefer the aggregate line (no team field)
+  const agg = splits.find((s) => !s.team && s.stat);
+  if (agg?.stat) return agg.stat;
+
+  // 2) Otherwise, merge team lines (limit to regular season if present)
+  const regularOnly = splits.some((s) => s.gameType === "R")
+    ? splits.filter((s) => s.gameType === "R")
+    : splits;
+
+  // Merge numeric fields; for non-numeric keep the last seen value
+  const merged: Record<string, any> = {};
+  for (const s of regularOnly) {
+    const st = s?.stat ?? {};
+    for (const [k, v] of Object.entries(st)) {
+      if (typeof v === "number") {
+        merged[k] = (merged[k] ?? 0) + v;
+      } else {
+        // strings like ".244", "0.71" aren't trivially summable; prefer last
+        merged[k] = v;
+      }
+    }
+  }
+  return Object.keys(merged).length ? merged : null;
 }
