@@ -19,8 +19,11 @@ export async function OPTIONS() {
 
 const STALE_MS = 10_000; // 10 seconds
 
-export async function GET(_req: Request, ctx: { params: Promise<{ gamePk: string }> }) {
-  const { gamePk: gamePkRaw } = await ctx.params;        // ← await it
+export async function GET(
+  _req: Request,
+  ctx: { params: Promise<{ gamePk: string }> }
+) {
+  const { gamePk: gamePkRaw } = await ctx.params; // Next App Router: await params
   const gamePk = Number(gamePkRaw);
   if (!gamePk) {
     return NextResponse.json(
@@ -33,13 +36,16 @@ export async function GET(_req: Request, ctx: { params: Promise<{ gamePk: string
   const col = db.collection("games");
 
   // 1) Read current doc
-  let doc = await col.findOne({ gamePk });
+  let doc = await col.findOne<{ venue?: string; updatedAt?: any; [k: string]: any }>({ gamePk });
+
+  // If this is a MOCK game, never refresh from MLB — keep whatever is stored.
+  const isMock = doc?.venue === "MOCK";
 
   const now = Date.now();
   const updatedAt = doc?.updatedAt ? new Date(doc.updatedAt).getTime() : 0;
-  const isStale = !doc || now - updatedAt > STALE_MS;
+  const isStale = !doc || (!isMock && now - updatedAt > STALE_MS);
 
-  // 2) If stale, pull from MLB and upsert
+  // 2) If stale AND not a MOCK game, pull from MLB and upsert
   if (isStale) {
     try {
       const snap = await fetchMlbLive(gamePk);
@@ -62,6 +68,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ gamePk: string
         teams: snap.teams,
         home_RHE: snap.home_RHE,
         away_RHE: snap.away_RHE,
+        // Keep existing venue if already set (but if it was MOCK we wouldn't be here)
         venue: snap.venue ?? doc?.venue ?? null,
         updatedAt: new Date(),
       };
@@ -74,7 +81,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ gamePk: string
 
       doc = await col.findOne({ gamePk });
     } catch {
-      // swallow fetch errors; fall back to last-known doc
+      // MLB fetch failed — fall back to last-known doc
     }
   }
 
@@ -85,10 +92,11 @@ export async function GET(_req: Request, ctx: { params: Promise<{ gamePk: string
     );
   }
 
+  // 3) Shape response from doc (works for both real and MOCK)
   const response = {
     gamePk,
-    date: doc.date,
-    gameDate: doc.gameDate,
+    date: doc.date ?? null,
+    gameDate: doc.gameDate ?? null,
     status: String(doc.status ?? ""),
     inning: doc.inning ?? null,
     inning_desc: doc.inning_desc ?? "—",
