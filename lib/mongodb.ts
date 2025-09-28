@@ -28,11 +28,15 @@ async function ensureIndexes(db: Db) {
   if (indexesPromise) return indexesPromise;
 
   indexesPromise = (async () => {
-    const games = db.collection("games");
-    const chats = db.collection("game_chats");
-    const teams = db.collection("mlb_teams");
-    const standings = db.collection("mlb_standings");
-    const playerStats = db.collection("mlb_player_stats");
+    const games        = db.collection("games");
+    const chats        = db.collection("game_chats");
+    const teams        = db.collection("mlb_teams");
+    const standings    = db.collection("mlb_standings");
+    const playerStats  = db.collection("mlb_player_stats");
+
+    // NEW: quiz collections
+    const quizQuestions = db.collection("quiz_questions");
+    const quizVotes     = db.collection("quiz_votes");
 
     await Promise.all([
       // games (live feed & querying by date/status)
@@ -43,7 +47,7 @@ async function ensureIndexes(db: Db) {
 
       // chat per game, time-ordered (optionally add TTL if you want auto-prune)
       chats.createIndex({ gamePk: 1, ts: 1 }),
-      // Example TTL (uncomment if desired): 
+      // Example TTL (uncomment if desired):
       // chats.createIndex({ ts: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 90 }),
 
       // teams (unique id)
@@ -56,6 +60,18 @@ async function ensureIndexes(db: Db) {
       // player stats per season
       playerStats.createIndex({ playerId: 1, season: 1 }, { unique: true }),
       playerStats.createIndex({ updatedAt: -1 }),
+
+      // ---------- QUIZ INDEXES ----------
+      // latest question lookup per game
+      quizQuestions.createIndex({ gamePk: 1, createdAt: -1 }),
+      // optional cleanup by expiry (if you set expiresAt)
+      quizQuestions.createIndex({ gamePk: 1, expiresAt: 1 }),
+
+      // one vote per user per question
+      quizVotes.createIndex({ gamePk: 1, qid: 1, userKey: 1 }, { unique: true }),
+      // aggregate answers quickly
+      quizVotes.createIndex({ gamePk: 1, qid: 1, answer: 1 }),
+      quizVotes.createIndex({ ts: -1 }),
     ]);
 
     globalForMongo.__mongo!.indexesReady = true;
